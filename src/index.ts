@@ -22,10 +22,10 @@ if (!JIMENG_ACCESS_KEY || !JIMENG_SECRET_KEY) {
 
 // 图片比例映射
 const RATIO_MAPPING: Record<string, { width: number; height: number }> = {
-  "4:3": { width: 512, height: 384 },
-  "3:4": { width: 384, height: 512 }, 
-  "16:9": { width: 512, height: 288 },
-  "9:16": { width: 288, height: 512 }
+  "4:3": { width: 768, height: 576},
+  "3:4": { width: 576, height: 768 }, 
+  "16:9": { width: 768, height: 432},
+  "9:16": { width: 432, height: 768 }
 };
 
 // 辅助函数：生成签名密钥
@@ -105,12 +105,18 @@ function signV4Request(
 }
 
 // 生成组合后的prompt
-function generatePrompt(text: string, illustration: string, color: string): string {
-  return `字体设计："${text}"，黑色字体，斜体，带阴影。干净的背景，白色到${color}渐变。点缀浅灰色、半透明${illustration}等元素插图做配饰插画。`;
+function generatePrompt(content: string, style: string): string {
+  let prompt = `生成一张图片，内容是：${content}`
+
+  if (style != undefined && style.length > 0) {
+    prompt += `，图片风格是：${style}`
+  }
+
+  return prompt
 }
 
 // 调用即梦AI API
-async function callJimengAPI(prompt: string, ratio: { width: number; height: number }): Promise<string | null> {
+async function callJimengAPI(prompt: string, ratio: { width: number; height: number }, use_pre_llm: boolean = false): Promise<string | null> {
   // 查询参数
   const queryParams = {
     'Action': 'CVProcess',
@@ -121,6 +127,7 @@ async function callJimengAPI(prompt: string, ratio: { width: number; height: num
   // 请求体参数
   const bodyParams = {
     req_key: "jimeng_high_aes_general_v21_L",
+    use_pre_llm: use_pre_llm,
     prompt: prompt,
     return_url: true,
     width: ratio.width,
@@ -181,12 +188,12 @@ server.tool(
   "generate-image",
   "当用户需要生成图片时使用的工具",
   {
-    text: z.string().describe("用户需要在图片上显示的文字"),
-    illustration: z.string().describe("根据用户要显示的文字，提取3-5个可以作为图片配饰的插画元素关键词"),
-    color: z.string().describe("图片的背景主色调"),
-    ratio: z.enum(["4:3", "3:4", "16:9", "9:16"]).describe("图片比例。支持: 4:3 (512*384), 3:4 (384*512), 16:9 (512*288), 9:16 (288*512)")
+    prompt: z.string().describe("图片的描述文本"),
+    illustration: z.string().describe("图片风格关键词"),
+    ratio: z.enum(["4:3", "3:4", "16:9", "9:16"]).describe("图片比例。支持: 4:3 (768*576), 3:4 (576*768), 16:9 (768*432), 9:16 (432*768)"),
+    use_pre_llm: z.boolean().describe("是否需要LLM进行扩写优化"),
   },
-  async ({ text, illustration, color, ratio }: { text: string; illustration: string; color: string; ratio: string }) => {
+  async ({ prompt, illustration, ratio, use_pre_llm }: { prompt: string; illustration: string; ratio: string, use_pre_llm: boolean }) => {
     const imageSize = RATIO_MAPPING[ratio];
     
     if (!imageSize) {
@@ -213,9 +220,8 @@ server.tool(
     }
 
     // 生成组合后的prompt
-    const prompt = generatePrompt(text, illustration, color);
-
-    const imageUrl = await callJimengAPI(prompt, imageSize);
+    const final_prompt = generatePrompt(prompt, illustration);
+    const imageUrl = await callJimengAPI(final_prompt, imageSize, use_pre_llm);
 
     if (!imageUrl) {
       return {
@@ -232,7 +238,7 @@ server.tool(
       content: [
         {
           type: "text",
-          text: `图片生成成功！\n\n显示文字: ${text}\n配饰元素: ${illustration}\n背景色调: ${color}\n图片比例: ${ratio} (${imageSize.width}×${imageSize.height})\n生成提示词: ${prompt}\n图片URL: ${imageUrl}`
+          text: `图片生成成功！\n\nPrompt: ${final_prompt}\n图片比例: ${ratio} (${imageSize.width}×${imageSize.height})\n图片URL: ${imageUrl}`
         }
       ]
     };
